@@ -9,12 +9,14 @@
 typedef struct MidiInterface
 {
     int fd;
+    uint8_t* out_buf;
 } MidiInterface;
 
-int open_midi_device(MidiInterface* interface, const char* device);
+int open_midi_device(MidiInterface** interface, const char* device);
+int close_midi_device(MidiInterface* interface);
 
-int read_midi_device(MidiInterface interface, Message* buffer);
-int write_midi_device(MidiInterface interface, const Message* buffer);
+int read_midi_device(MidiInterface* interface, Message* buffer);
+int write_midi_device(MidiInterface* interface, const Message* buffer);
 
 
 #endif

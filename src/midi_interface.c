@@ -9,7 +9,7 @@ static const char* devices[] = {"/dev/midi", "/dev/midi2", NULL};
 
 int try_open_device(const char* device);
 
-int open_midi_device(MidiInterface* interface, const char* device)
+int open_midi_device(MidiInterface** interface, const char* device)
 {
     int fd;
 
@@ -35,14 +35,27 @@ int open_midi_device(MidiInterface* interface, const char* device)
     else
         printf("Using device %s\n", device);
 
-    interface->fd = fd;
+    *interface = (MidiInterface*)malloc(sizeof(MidiInterface));
+
+    (*interface)->fd = fd;
+    (*interface)->out_buf = (uint8_t*)malloc(8);
     return fd;
 }
 
-int read_midi_device(MidiInterface interface, Message* buffer)
+int close_midi_device(MidiInterface* interface)
+{
+    close(interface->fd);
+
+    free(interface->out_buf);
+    free(interface);
+
+    return 0;
+}
+
+int read_midi_device(MidiInterface* interface, Message* buffer)
 {
     uint8_t status;
-    int result = read(interface.fd, &status, 1);
+    int result = read(interface->fd, &status, 1);
     if(result < 0)
         return MIDI_READ_ERROR;
 
@@ -54,7 +67,7 @@ int read_midi_device(MidiInterface interface, Message* buffer)
     if(buffer->length < 0)
         return buffer->length;
 
-    result = read(interface.fd, buffer->data, buffer->length);
+    result = read(interface->fd, buffer->data, buffer->length);
     if(result < 0)
         return MIDI_READ_ERROR;
 
@@ -66,18 +79,17 @@ int read_midi_device(MidiInterface interface, Message* buffer)
     return 0;
 }
 
-int write_midi_device(MidiInterface interface, const Message* buffer)
+int write_midi_device(MidiInterface* interface, const Message* buffer)
 {
     uint8_t status;
     int result = encode_status_byte(buffer, &status);
     if(result < 0)
         return result;
 
-    uint8_t* buffer_out = (uint8_t*)malloc(1 + buffer->length);
-    buffer_out[0] = status;
-    memcpy(buffer_out + 1, buffer->data, buffer->length);
+    interface->out_buf[0] = status;
+    memcpy(interface->out_buf + 1, buffer->data, buffer->length);
 
-    result = write(interface.fd, buffer_out, 1 + buffer->length);
+    result = write(interface->fd, interface->out_buf, 1 + buffer->length);
     if(result < 0)
         return MIDI_WRITE_ERROR;
 }

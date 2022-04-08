@@ -58,7 +58,7 @@ void *arpeggio_loop(void* data);
 
 int main(int argc, char** argv)
 {
-    MidiInterface interface;
+    MidiInterface* interface;
     int result = open_midi_device(&interface, NULL);
     if(result < 0)
         exit(result);
@@ -67,7 +67,7 @@ int main(int argc, char** argv)
     Note current_note;
 
     pthread_t arpeggio_thread;
-    pthread_create(&arpeggio_thread, NULL, arpeggio_loop, (void*)&interface);
+    pthread_create(&arpeggio_thread, NULL, arpeggio_loop, (void*)interface);
 
     Message* message;
     create_message(&message);
@@ -107,7 +107,7 @@ int main(int argc, char** argv)
 
     pthread_join(arpeggio_thread, NULL);
     free_message(message);
-    close(interface.fd);
+    close_midi_device(interface);
     return 0;
 }
 
@@ -127,7 +127,7 @@ void *arpeggio_loop(void* data)
             Note out = *note;
             message->data[0] = out.pitch + pattern[step].pitch;
             message->data[1] = out.velocity + pattern[step].velocity;
-            int result = write_midi_device(*interface, message);
+            int result = write_midi_device(interface, message);
             if(result < 0)
                 fprintf(stderr, "Failed to send message: %s\n", midi_strerror(result));
 
