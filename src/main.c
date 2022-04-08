@@ -8,7 +8,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 
-static const char* devices[] = {"/dev/midi", "/dev/midi2", NULL};
+#include "midi_interface.h"
 
 typedef struct Note
 {
@@ -20,7 +20,7 @@ typedef struct Note
 typedef struct Offset
 {
     signed char pitch;
-    signed char velocity
+    signed char velocity;
 } Offset;
 
 static const Offset pattern[] = {
@@ -58,80 +58,78 @@ void *arpeggio_loop(void* data);
 
 int main(int argc, char** argv)
 {
-    unsigned char data[3] = {0, 0, 0};
+    MidiInterface interface;
+    int result = open_midi_device(&interface, NULL);
+    if(result < 0)
+        exit(result);
+
     int key_down = 0;
     Note current_note;
 
-    const char* device;
-    int fd;
-    int i = 0;
-    while((device = devices[i++]) != NULL)
-    {
-        printf("Trying %s...", device);
-
-        fd = open(device, O_RDWR, 0);
-        if(fd < 0)
-        {
-            printf("Failed: %s\n", strerror(errno));
-        }
-        else
-        {
-            printf("Success!\n");
-            break;
-        }
-    }
-
-    if(fd < 0)
-    {
-        fprintf(stderr, "No MIDI devices detected.\n");
-        return -1;
-    }
-
-    printf("Using MIDI device %s\n", device);
     pthread_t arpeggio_thread;
-    pthread_create(&arpeggio_thread, NULL, arpeggio_loop, (void*)fd);
+    pthread_create(&arpeggio_thread, NULL, arpeggio_loop, (void*)&interface);
+
+    Message* message;
+    create_message(&message);
 
     for(;;)
     {
-        read(fd, (void*)data, sizeof(data));
-
-        if(data[0] != 0xfd)
+        result = read_midi_device(interface, message);
+        if(result < 0)
         {
-            if(data[2] > 0)
+            fprintf(stderr, "Failed to read message: %s\n", midi_strerror(result));
+            if(result == MIDI_UNKNOWN_STATUS_BYTE)
             {
-                key_down = 1;
-                note = &current_note;
+                fprintf(stderr, "%x\n", message->type);
+                exit(result);
+            }
+        }
 
-                current_note.channel = 0x90;
-                current_note.pitch = data[1];
-                current_note.velocity = data[2];
-            }
-            else if(data[1] == current_note.pitch)
-            {
-                key_down = 0;
-                note = NULL;
-                step = 0;
-            }
+        // if(message->type != SYSTEM_EXCLUSIVE)
+            // printf("ch: %x, s: %x -- %02x %02x\n", message->channel, message->type, message->data[0], message->data[1]);
+
+        if(message->type == NOTE_ON)
+        {
+            key_down = 1;
+            note = &current_note;
+
+            current_note.channel = 0x90;
+            current_note.pitch = message->data[0];
+            current_note.velocity = message->data[1];
+        }
+        else if(message->type == NOTE_OFF && message->data[0] == note->pitch)
+        {
+            key_down = 0;
+            note = NULL;
+            step = 0;
         }
     }
 
     pthread_join(arpeggio_thread, NULL);
-    close(fd);
+    free_message(message);
+    close(interface.fd);
     return 0;
 }
 
 void *arpeggio_loop(void* data)
 {
-    int fd = (int)data;
+    MidiInterface* interface = (MidiInterface*)data;
+    Message* message;
+    create_message(&message);
+    message->channel = 0;
+    message->length = 2;
+    message->type = NOTE_ON;
 
     while(stop == 0)
     {
         if(note != NULL)
         {
             Note out = *note;
-            out.pitch += pattern[step].pitch;
-            out.velocity += pattern[step].velocity;
-            write(fd, &out, sizeof(Note));
+            message->data[0] = out.pitch + pattern[step].pitch;
+            message->data[1] = out.velocity + pattern[step].velocity;
+            int result = write_midi_device(*interface, message);
+            if(result < 0)
+                fprintf(stderr, "Failed to send message: %s\n", midi_strerror(result));
 
             step++;
             if(step >= (sizeof(pattern) / sizeof(Offset)))
@@ -140,4 +138,6 @@ void *arpeggio_loop(void* data)
             usleep(166666);
         }
     }
+
+    free_message(message);
 }
