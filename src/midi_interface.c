@@ -94,6 +94,11 @@ int write_midi_device(MidiInterface* interface, const Message* buffer)
         return MIDI_WRITE_ERROR;
 }
 
+int write_midi_device_raw(MidiInterface* interface, const char* buffer)
+{
+    //
+}
+
 int try_open_device(const char* device)
 {
     int fd = open(device, O_RDWR, 0);

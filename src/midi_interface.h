@@ -17,6 +17,7 @@ int close_midi_device(MidiInterface* interface);
 
 int read_midi_device(MidiInterface* interface, Message* buffer);
 int write_midi_device(MidiInterface* interface, const Message* buffer);
+int write_midi_device_raw(MidiInterface* interface, const char* buffer);
 
 
 #endif
