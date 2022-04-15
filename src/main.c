@@ -12,13 +12,14 @@
 #include "midi_interface.h"
 #include "midi_parser.h"
 
-uint32_t time_per_quarter;
-uint32_t ticks_per_quarter;
 MidiInterface* interface;
 
 static int _Atomic playing = ATOMIC_VAR_INIT(0);
+static uint32_t _Atomic time_per_quarter = ATOMIC_VAR_INIT(1);
+static uint32_t _Atomic current_tick = ATOMIC_VAR_INIT(0);
 
 void* play_track(void* data);
+void* advance_counter(void* data);
 
 int main(int argc, char** argv)
 {
@@ -28,8 +29,7 @@ int main(int argc, char** argv)
         exit(-1);
     }
 
-
-
+    printf("Loading MIDI file...\n");
     MidiParser* parser;
     parser = parseMidi(argv[1], false, true);
     if(!parser)
@@ -37,13 +37,16 @@ int main(int argc, char** argv)
         fprintf(stderr, "Failed to read MIDI file\n");
         exit(-1);
     }
-
-    time_per_quarter = ((uint32_t*)(parser->tracks[0].events[2].infos))[0];
-    ticks_per_quarter = parser->ticks;
+    printf("Done. Press enter to continue.\n");
+    getchar();  
 
     int result = open_midi_device(&interface, NULL);
     if(result < 0)
         exit(result);
+
+    pthread_t counter_thread;
+    pthread_create(&counter_thread, NULL, advance_counter, &(parser->ticks));
+    pthread_detach(counter_thread);
 
     pthread_t* threads = (pthread_t*)malloc(parser->nbOfTracks * sizeof(pthread_t));
     for(int i = 0; i < parser->nbOfTracks; i++)
@@ -60,8 +63,19 @@ int main(int argc, char** argv)
     free(threads);
     close_midi_device(interface);
     
-
     return 0;
+}
+
+void* advance_counter(void* data)
+{
+    uint16_t ticks_per_quarter = *((uint32_t*)data);
+    while(!playing);
+
+    for(;;)
+    {
+        usleep((uint64_t)time_per_quarter / ticks_per_quarter);
+        current_tick++;
+    }
 }
 
 void* play_track(void* data)
@@ -69,30 +83,41 @@ void* play_track(void* data)
     Track* track = (Track*)data;
     Message* message;
     create_message(&message);
-    message->channel = 0;
     message->length = 2;
 
+    uint64_t tick_of_last_event = 0;
     int current_event = 0;
-    struct timeval begin, end;
 
     while(!playing);
-    gettimeofday(&begin, NULL);
 
     while(current_event < track->nbOfEvents)
     {
         Event event = track->events[current_event];
+        while(tick_of_last_event + event.timeToAppear > current_tick);
 
-        gettimeofday(&end, NULL);
-        uint64_t deltatime = ((end.tv_sec - begin.tv_sec) * 1000000) + (end.tv_usec - begin.tv_usec);
-        if(event.timeToAppear > 0)
-            usleep(event.timeToAppear * time_per_quarter / ticks_per_quarter - deltatime);
-        gettimeofday(&begin, NULL);
-
-        if(event.type == MidiNotePressed || event.type == MidiNoteReleased)
+        if(event.type == MidiTempoChanged)
         {
-            message->type = (event.type == MidiNotePressed) ? NOTE_ON : NOTE_OFF;
+            time_per_quarter = ((uint32_t*)(event.infos))[0];
+        }
+        else if(event.type == MidiNotePressed || event.type == MidiNoteReleased || event.type == MidiControllerValueChanged)
+        {
+            message->channel = (((uint8_t*)(event.infos))[0] & 0xF);
             message->data = event.infos + 1;
 
+            switch(event.type)
+            {
+                case MidiNotePressed:
+                    message->type = NOTE_ON;
+                    break;
+
+                case MidiNoteReleased:
+                    message->type = NOTE_OFF;
+                    break;
+
+                case MidiControllerValueChanged:
+                    message->type = CONTROLLER_CHANGE;
+                    break;
+            }
             // printf("Sending %d %d\n", message->data[0], message->data[1]);
             int result = write_midi_device(interface, message);
             if(result < 0)
@@ -100,5 +125,6 @@ void* play_track(void* data)
         }
 
         current_event++;
+        tick_of_last_event += event.timeToAppear;
     }
 }

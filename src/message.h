@@ -5,7 +5,7 @@
 
 typedef enum MessageType
 {
-    NOTE_OFF, NOTE_ON,
+    NOTE_OFF, NOTE_ON, CONTROLLER_CHANGE,
     SYSTEM_EXCLUSIVE
 } MessageType;
 

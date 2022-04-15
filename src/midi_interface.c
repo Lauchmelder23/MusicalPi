@@ -39,12 +39,15 @@ int open_midi_device(MidiInterface** interface, const char* device)
 
     (*interface)->fd = fd;
     (*interface)->out_buf = (uint8_t*)malloc(8);
+    pthread_mutex_init(&((*interface)->write_mutex), NULL);
+
     return fd;
 }
 
 int close_midi_device(MidiInterface* interface)
 {
     close(interface->fd);
+    pthread_mutex_destroy(&(interface->write_mutex));
 
     free(interface->out_buf);
     free(interface);
@@ -86,12 +89,17 @@ int write_midi_device(MidiInterface* interface, const Message* buffer)
     if(result < 0)
         return result;
 
+    pthread_mutex_lock(&(interface->write_mutex));
     interface->out_buf[0] = status;
+    
     memcpy(interface->out_buf + 1, buffer->data, buffer->length);
 
     result = write(interface->fd, interface->out_buf, 1 + buffer->length);
+    pthread_mutex_unlock(&(interface->write_mutex));
     if(result < 0)
         return MIDI_WRITE_ERROR;
+
+    return 0;
 }
 
 int write_midi_device_raw(MidiInterface* interface, const char* buffer)
@@ -101,7 +109,7 @@ int write_midi_device_raw(MidiInterface* interface, const char* buffer)
 
 int try_open_device(const char* device)
 {
-    int fd = open(device, O_RDWR, 0);
+    int fd = open(device, O_RDWR | O_ASYNC, 0);
 
     return fd;
 }

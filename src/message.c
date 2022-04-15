@@ -22,6 +22,7 @@ int data_length(MessageType type)
     {
     case NOTE_ON:   return 2;
     case NOTE_OFF:  return 2;
+    case CONTROLLER_CHANGE: return 2;
 
     case SYSTEM_EXCLUSIVE: return 0;
     }
@@ -41,6 +42,10 @@ int decode_status_byte(Message* message, uint8_t status)
 
     case 0x80:
         message->type = NOTE_OFF;
+        break;
+
+    case 0xB0:
+        message->type = CONTROLLER_CHANGE;
         break;
 
     case 0xF0:
@@ -67,6 +72,10 @@ int encode_status_byte(const Message* message, uint8_t* status)
 
     case NOTE_OFF:
         *status |= 0x80;
+        break;
+
+    case CONTROLLER_CHANGE:
+        *status |= 0xB0;
         break;
 
     case SYSTEM_EXCLUSIVE:
