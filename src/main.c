@@ -69,11 +69,18 @@ int main(int argc, char** argv)
 void* advance_counter(void* data)
 {
     uint16_t ticks_per_quarter = *((uint32_t*)data);
+    struct timespec begin, end;
     while(!playing);
 
+    clock_gettime(CLOCK_REALTIME, &begin);
     for(;;)
     {
-        usleep((uint64_t)time_per_quarter / ticks_per_quarter);
+        clock_gettime(CLOCK_REALTIME, &end);
+        uint64_t diff = 1000000 * (end.tv_sec - begin.tv_sec) + (end.tv_nsec - begin.tv_nsec) / 1000;
+        diff -= (uint64_t)time_per_quarter / ticks_per_quarter;
+        diff *= (diff < (uint64_t)time_per_quarter / ticks_per_quarter);
+        clock_gettime(CLOCK_REALTIME, &begin);
+        usleep((uint64_t)time_per_quarter / ticks_per_quarter - diff);
         current_tick++;
     }
 }
