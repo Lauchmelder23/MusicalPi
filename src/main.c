@@ -1,16 +1,19 @@
-#include <linux/soundcard.h>
 #include <stdio.h>
-#include <fcntl.h>
 #include <unistd.h>
-#include <errno.h>
-#include <string.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <string.h>
 #include <stdatomic.h>
 #include <sys/time.h>
 
 #include "midi_interface.h"
 #include "midi_parser.h"
+
+typedef struct 
+{
+    const char* midi_file;
+    const char* mapping_file;
+} CommandArguments;
 
 MidiInterface* interface;
 
@@ -18,16 +21,14 @@ static int _Atomic playing = ATOMIC_VAR_INIT(0);
 static uint32_t _Atomic time_per_quarter = ATOMIC_VAR_INIT(1);
 static uint32_t _Atomic current_tick = ATOMIC_VAR_INIT(0);
 
+CommandArguments parse_command_args(int argc, char** argv);
+
 void* play_track(void* data);
 void* advance_counter(void* data);
 
 int main(int argc, char** argv)
 {
-    if(argc != 2)
-    {
-        fprintf(stderr, "Usage: musicalpi <midi file>");
-        exit(-1);
-    }
+    CommandArguments args = parse_command_args(argc, argv);
 
     printf("Loading MIDI file...\n");
     MidiParser* parser;
@@ -106,7 +107,12 @@ void* play_track(void* data)
         {
             time_per_quarter = ((uint32_t*)(event.infos))[0];
         }
-        else if(event.type == MidiNotePressed || event.type == MidiNoteReleased || event.type == MidiControllerValueChanged)
+        else if(
+            event.type == MidiNotePressed || 
+            event.type == MidiNoteReleased || 
+            event.type == MidiControllerValueChanged ||
+            event.type == MidiProgramChanged
+        )
         {
             message->channel = (((uint8_t*)(event.infos))[0] & 0xF);
             message->data = event.infos + 1;
@@ -124,6 +130,13 @@ void* play_track(void* data)
                 case MidiControllerValueChanged:
                     message->type = CONTROLLER_CHANGE;
                     break;
+
+                case MidiProgramChanged:
+                    message->type = PROGRAM_CHANGE;
+                    break;
+
+                default:
+                    break;
             }
             // printf("Sending %d %d\n", message->data[0], message->data[1]);
             int result = write_midi_device(interface, message);
@@ -134,4 +147,47 @@ void* play_track(void* data)
         current_event++;
         tick_of_last_event += event.timeToAppear;
     }
+
+    return NULL;
+}
+
+CommandArguments parse_command_args(int argc, char** argv)
+{
+    CommandArguments parsed_args;
+    parsed_args.midi_file = NULL;
+    parsed_args.mapping_file = NULL;
+
+    int opt;
+    
+    while ((opt = getopt(argc, argv, "hm:")) != -1)
+    {
+        switch(opt)
+        {
+        case 'm':
+        {
+            size_t len = strlen(optarg);
+            parsed_args.mapping_file = (const char*)malloc(len);
+            memcpy((void*)parsed_args.mapping_file, (void*)optarg, len);
+        } break;
+
+        case 'h':
+            fprintf(stderr, "Usage: %s [-m mapping_file] midi_file\n", argv[0]);
+            exit(EXIT_SUCCESS);
+        }
+    }
+
+    if(optind < argc)
+    {
+        size_t len = strlen(argv[optind]);
+        parsed_args.midi_file = (const char*)malloc(len);
+        memcpy((void*)parsed_args.midi_file, (void*)argv[optind], len);
+    }
+
+    if(parsed_args.midi_file == NULL)
+    {
+        fprintf(stderr, "A MIDI file is required\n");
+        exit(EXIT_FAILURE);
+    }
+
+    return parsed_args;
 }

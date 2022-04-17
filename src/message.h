@@ -5,8 +5,7 @@
 
 typedef enum MessageType
 {
-    NOTE_OFF, NOTE_ON, CONTROLLER_CHANGE,
-    SYSTEM_EXCLUSIVE
+    NOTE_OFF, NOTE_ON, CONTROLLER_CHANGE, PROGRAM_CHANGE, SYSTEM_EXCLUSIVE
 } MessageType;
 
 typedef struct Message
