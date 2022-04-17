@@ -94,6 +94,6 @@ int encode_status_byte(const Message* message, uint8_t* status)
     default:
         return MIDI_UNKNOWN_STATUS_BYTE;
     }
-
+    
     return 0;   
 }

@@ -8,14 +8,16 @@
 
 #include "midi_interface.h"
 #include "midi_parser.h"
+#include "mapping.h"
 
 typedef struct 
 {
-    const char* midi_file;
-    const char* mapping_file;
+    char* midi_file;
+    char* mapping_file;
 } CommandArguments;
 
 MidiInterface* interface;
+uint8_t* map;
 
 static int _Atomic playing = ATOMIC_VAR_INIT(0);
 static uint32_t _Atomic time_per_quarter = ATOMIC_VAR_INIT(1);
@@ -30,9 +32,14 @@ int main(int argc, char** argv)
 {
     CommandArguments args = parse_command_args(argc, argv);
 
+    if(args.mapping_file)
+        map = load_program_map(args.mapping_file);
+    else
+        map = get_default_map();
+
     printf("Loading MIDI file...\n");
     MidiParser* parser;
-    parser = parseMidi(argv[1], false, true);
+    parser = parseMidi(args.midi_file, false, true);
     if(!parser)
     {
         fprintf(stderr, "Failed to read MIDI file\n");
@@ -63,7 +70,8 @@ int main(int argc, char** argv)
     }
     free(threads);
     close_midi_device(interface);
-    
+    free(map);
+
     return 0;
 }
 
@@ -133,12 +141,15 @@ void* play_track(void* data)
 
                 case MidiProgramChanged:
                     message->type = PROGRAM_CHANGE;
+                    // printf("ch %u mapped %u to %u\n", message->channel, message->data[0], map[message->data[0]]);
+                    message->data[0] = map[message->data[0]];
                     break;
 
                 default:
                     break;
             }
-            // printf("Sending %d %d\n", message->data[0], message->data[1]);
+
+            // printf("ch %u\n", message->channel);
             int result = write_midi_device(interface, message);
             if(result < 0)
                 fprintf(stderr, "Write err: %s\n", midi_strerror(result));
@@ -166,21 +177,26 @@ CommandArguments parse_command_args(int argc, char** argv)
         case 'm':
         {
             size_t len = strlen(optarg);
-            parsed_args.mapping_file = (const char*)malloc(len);
+            parsed_args.mapping_file = (char*)malloc(len);
             memcpy((void*)parsed_args.mapping_file, (void*)optarg, len);
         } break;
 
         case 'h':
             fprintf(stderr, "Usage: %s [-m mapping_file] midi_file\n", argv[0]);
             exit(EXIT_SUCCESS);
+
+        default:
+            exit(EXIT_FAILURE);
+            break;
         }
+
     }
 
     if(optind < argc)
     {
         size_t len = strlen(argv[optind]);
-        parsed_args.midi_file = (const char*)malloc(len);
-        memcpy((void*)parsed_args.midi_file, (void*)argv[optind], len);
+        parsed_args.midi_file = (char*)malloc(len + 1);
+        strcpy(parsed_args.midi_file, argv[optind]);
     }
 
     if(parsed_args.midi_file == NULL)
